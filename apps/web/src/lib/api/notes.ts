@@ -6,6 +6,30 @@ import { calculateReadingTime, getNextUntitledName, setEditorContent } from '@/u
 import { eq, and } from 'drizzle-orm';
 import { get } from 'svelte/store';
 
+// Backend API configuration
+const BACKEND_API_URL = 'http://localhost:3000';
+
+// Save note to backend API
+const saveNoteToBackend = async (path: string, markdown: string) => {
+	const response = await fetch(`${BACKEND_API_URL}/markdown`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			path,
+			markdown
+		})
+	});
+
+	if (!response.ok) {
+		const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+		throw new Error(`Backend API error: ${errorData.error || response.statusText}`);
+	}
+
+	return response.json();
+};
+
 // Create a new note
 export const createNote = async (dirPath: string, name?: string) => {
 	// Read the directory
@@ -108,10 +132,27 @@ export const saveNote = async (path: string) => {
 	// Calculate file size in bytes
 	const size = new TextEncoder().encode(content).length;
 
-	await db
-		.update(entryTable)
-		.set({ content, updatedAt: new Date(), size })
-		.where(eq(entryTable.path, path));
+	console.log('Saving note:', path, 'Size:', size, 'content:', content);
+
+	// Update the database
+	// await db
+	// 	.update(entryTable)
+	// 	.set({ content, updatedAt: new Date(), size })
+	// 	.where(eq(entryTable.path, path));
+
+	// Also save to backend API
+	try {
+		// Remove first path segment and get the filename
+		const pathSegments = path.split('/').filter(Boolean); // Remove empty segments
+		const filename =
+			pathSegments.length > 1
+				? pathSegments.slice(1).join('/')
+				: path.split('/').pop() || 'untitled.md';
+		await saveNoteToBackend(filename, content);
+	} catch (error) {
+		console.error('Failed to save note to backend:', error);
+		// Don't throw error to prevent disrupting the main save functionality
+	}
 };
 
 export const moveNote = async (source: string, target: string) => {
