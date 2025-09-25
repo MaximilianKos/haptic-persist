@@ -173,11 +173,6 @@ app.post('/markdown', async (req, res) => {
 
     const { path: filePath, markdown } = req.body;
 
-    if (!markdown) {
-      return res
-        .status(400)
-        .json({ error: 'No markdown content provided. Include "markdown" field in JSON body' });
-    }
     if (!filePath) {
       return res.status(400).json({ error: 'path is required. Include "path" field in JSON body' });
     }
@@ -234,12 +229,10 @@ app.get('/markdown', async (req, res) => {
       stats = await fs.stat(targetPath);
     } catch (error) {
       if (error.code === 'ENOENT') {
-        return res
-          .status(404)
-          .json({
-            error: 'Path not found',
-            details: 'The requested file or directory does not exist'
-          });
+        return res.status(404).json({
+          error: 'Path not found',
+          details: 'The requested file or directory does not exist'
+        });
       }
       throw error;
     }
@@ -306,11 +299,206 @@ app.get('/markdown/content', async (req, res) => {
       name: path.basename(targetPath),
       content,
       size: stats.size,
-      lastModified: stats.mtime.toISOString()
+      modifiedAt: stats.mtime.toISOString(),
+      createdAt: stats.ctime.toISOString()
     });
   } catch (error) {
     console.error('Error fetching markdown content:', error);
     res.status(500).json({ error: 'Failed to fetch markdown content', details: error.message });
+  }
+});
+
+app.get('/markdown/names', async (req, res) => {
+  try {
+    const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : req.query.path;
+
+    // Default to volume root if no path specified
+    let targetPath;
+    if (rawPath) {
+      const resolved = resolveFsPathFromApiPath(rawPath);
+      if (!resolved) {
+        return res.status(400).json({ error: 'Invalid path' });
+      }
+      targetPath = resolved.fsPath;
+    } else {
+      targetPath = path.resolve(VOLUME_PATH);
+    }
+
+    let stats;
+    try {
+      stats = await fs.stat(targetPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.status(404).json({
+          error: 'Path not found',
+          details: 'The requested directory does not exist'
+        });
+      }
+      throw error;
+    }
+
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ error: 'Path must point to a directory' });
+    }
+
+    const dirEntries = await fs.readdir(targetPath, { withFileTypes: true });
+    const sortedEntries = dirEntries
+      .filter((entry) => !entry.name.startsWith('.')) // Skip hidden files/folders
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+    const names = sortedEntries.map((entry) => ({ name: entry.name }));
+
+    return res.json(names);
+  } catch (error) {
+    console.error('Error fetching file/folder names:', error);
+    res.status(500).json({ error: 'Failed to fetch names', details: error.message });
+  }
+});
+
+app.post('/markdown/folder', async (req, res) => {
+  try {
+    if (!req.is('application/json')) {
+      return res.status(400).json({ error: 'Invalid content type. Expected application/json' });
+    }
+
+    const { path: folderPath } = req.body;
+
+    if (!folderPath) {
+      return res.status(400).json({ error: 'path is required. Include "path" field in JSON body' });
+    }
+
+    const resolved = resolveFsPathFromApiPath(folderPath);
+    if (!resolved) {
+      return res.status(400).json({
+        error: 'Invalid path provided. Ensure the "path" field contains a valid value'
+      });
+    }
+
+    const { prepared, fsPath } = resolved;
+
+    // Check if the directory already exists
+    try {
+      const stats = await fs.stat(fsPath);
+      if (stats.isDirectory()) {
+        return res.status(409).json({
+          error: 'Directory already exists',
+          path: prepared.normalizedPath
+        });
+      } else {
+        return res.status(409).json({
+          error: 'A file with the same name already exists',
+          path: prepared.normalizedPath
+        });
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+      // Directory doesn't exist, which is what we want
+    }
+
+    // Create the directory (and any parent directories if needed)
+    await fs.mkdir(fsPath, { recursive: true });
+    console.log(`Directory created: ${fsPath}`);
+
+    res.status(201).json({
+      message: 'Directory created successfully',
+      path: prepared.normalizedPath,
+      fullPath: fsPath
+    });
+  } catch (error) {
+    console.error('Error creating directory:', error);
+    res.status(500).json({
+      error: 'Failed to create directory',
+      details: error.message
+    });
+  }
+});
+
+// DELETE route to delete files or directories
+app.delete('/markdown', async (req, res) => {
+  try {
+    const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : req.query.path;
+    const recursive = req.query.recursive === 'true';
+
+    if (!rawPath) {
+      return res.status(400).json({ error: 'Path parameter is required' });
+    }
+
+    const resolved = resolveFsPathFromApiPath(rawPath);
+    if (!resolved) {
+      return res.status(400).json({ error: 'Invalid path' });
+    }
+
+    const { prepared: preparedPath, fsPath: targetPath } = resolved;
+
+    // Check if the path exists
+    let stats;
+    try {
+      stats = await fs.stat(targetPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.status(404).json({
+          error: 'Path not found',
+          details: 'The requested file or directory does not exist'
+        });
+      }
+      throw error;
+    }
+
+    // Prevent deletion of the root volume directory
+    const volResolved = path.resolve(VOLUME_PATH);
+    if (targetPath === volResolved) {
+      return res.status(403).json({
+        error: 'Cannot delete root directory',
+        details: 'Deletion of the root volume directory is not allowed'
+      });
+    }
+
+    if (stats.isDirectory()) {
+      if (!recursive) {
+        // Check if directory is empty
+        try {
+          const dirEntries = await fs.readdir(targetPath);
+          if (dirEntries.length > 0) {
+            return res.status(400).json({
+              error: 'Directory not empty',
+              details: 'Use recursive=true to delete non-empty directories'
+            });
+          }
+        } catch (error) {
+          throw error;
+        }
+      }
+
+      // Delete directory (recursive if specified)
+      await fs.rmdir(targetPath, { recursive });
+      console.log(`Directory deleted: ${targetPath}`);
+
+      res.status(200).json({
+        message: 'Directory deleted successfully',
+        path: preparedPath.normalizedPath,
+        type: 'directory',
+        recursive
+      });
+    } else {
+      // Delete file
+      await fs.unlink(targetPath);
+      console.log(`File deleted: ${targetPath}`);
+
+      res.status(200).json({
+        message: 'File deleted successfully',
+        path: preparedPath.normalizedPath,
+        name: path.basename(targetPath),
+        type: 'file'
+      });
+    }
+  } catch (error) {
+    console.error('Error deleting item:', error);
+    res.status(500).json({
+      error: 'Failed to delete item',
+      details: error.message
+    });
   }
 });
 

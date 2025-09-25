@@ -5,58 +5,52 @@ import { getNextUntitledName } from '@/utils';
 import { and, eq } from 'drizzle-orm';
 import { get } from 'svelte/store';
 import { moveNote } from './notes';
+import { createFolderInBackend, deleteItemInBackend, fetchAllItemNames } from './api';
 
 // Create a new folder
 export const createFolder = async (dirPath: string) => {
 	// Get the entry matching the path
-	const entry = await db.select().from(entryTable).where(eq(entryTable.path, dirPath));
+	//const entry = await db.select().from(entryTable).where(eq(entryTable.path, dirPath));
 
 	let files = [];
-	if (entry.length === 0) {
-		files = await db
-			.select()
-			.from(entryTable)
-			.where(eq(entryTable.collectionPath, get(collection)));
-	} else {
-		files = await db
-			.select()
-			.from(entryTable)
-			.where(
-				and(eq(entryTable.parentPath, dirPath), eq(entryTable.collectionPath, get(collection)))
-			);
-	}
+	// if (entry.length === 0) {
+	// 	files = await db
+	// 		.select()
+	// 		.from(entryTable)
+	// 		.where(eq(entryTable.collectionPath, get(collection)));
+	// } else {
+	// 	files = await db
+	// 		.select()
+	// 		.from(entryTable)
+	// 		.where(
+	// 			and(eq(entryTable.parentPath, dirPath), eq(entryTable.collectionPath, get(collection)))
+	// 		);
+	// }
+
+	files = await fetchAllItemNames(dirPath);
+
+	console.log('Existing files in directory:', files);
 
 	// Generate a new name (Untitled, if there are any exiting Untitled folders, increment the number by 1)
 	const name = getNextUntitledName(files, 'Untitled');
 
 	// Save the new folder
-	await db.insert(entryTable).values({
-		name,
-		path: `${dirPath}/${name}`.replace('//', '/'),
-		parentPath: dirPath,
-		collectionPath: get(collection),
-		isFolder: true
-	});
+	// await db.insert(entryTable).values({
+	// 	name,
+	// 	path: `${dirPath}/${name}`.replace('//', '/'),
+	// 	parentPath: dirPath,
+	// 	collectionPath: get(collection),
+	// 	isFolder: true
+	// });
+
+	await createFolderInBackend(`${dirPath}/${name}`.replace('//', '/'));
 
 	return `${dirPath}/${name}`.replace('//', '/');
 };
 
 // Delete a folder
 export const deleteFolder = async (path: string, recursive = false) => {
-	if (!recursive) {
-		let children = await db.select().from(entryTable).where(eq(entryTable.parentPath, path));
-
-		// Remove .DS_Store files from the children
-		children = children.filter((child) => child.name !== '.DS_Store');
-
-		// TODO: implement empty children check
-
-		if (children.length > 0) {
-			throw new Error('Folder is not empty');
-		}
-	}
-
-	await db.delete(entryTable).where(eq(entryTable.path, path));
+	await deleteItemInBackend(path, true);
 };
 
 // Rename a folder

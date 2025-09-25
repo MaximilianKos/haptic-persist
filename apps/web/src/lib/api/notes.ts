@@ -5,27 +5,34 @@ import type { NoteMetadataParams } from '@/types';
 import { calculateReadingTime, getNextUntitledName, setEditorContent } from '@/utils';
 import { eq, and } from 'drizzle-orm';
 import { get } from 'svelte/store';
-import { fetchNoteContentFromBackend, saveNoteToBackend } from './api';
+import {
+	deleteItemInBackend,
+	fetchAllItemNames,
+	fetchNoteContentFromBackend,
+	saveNoteToBackend
+} from './api';
 
 // Create a new note
 export const createNote = async (dirPath: string, name?: string) => {
 	// Read the directory
-	const dirEntry = await db.select().from(entryTable).where(eq(entryTable.path, dirPath));
+	//const dirEntry = await db.select().from(entryTable).where(eq(entryTable.path, dirPath));
 
 	let files = [];
-	if (dirEntry.length === 0) {
-		files = await db
-			.select()
-			.from(entryTable)
-			.where(eq(entryTable.collectionPath, get(collection)));
-	} else {
-		files = await db
-			.select()
-			.from(entryTable)
-			.where(
-				and(eq(entryTable.parentPath, dirPath), eq(entryTable.collectionPath, get(collection)))
-			);
-	}
+	// if (dirEntry.length === 0) {
+	// 	files = await db
+	// 		.select()
+	// 		.from(entryTable)
+	// 		.where(eq(entryTable.collectionPath, get(collection)));
+	// } else {
+	// 	files = await db
+	// 		.select()
+	// 		.from(entryTable)
+	// 		.where(
+	// 			and(eq(entryTable.parentPath, dirPath), eq(entryTable.collectionPath, get(collection)))
+	// 		);
+	// }
+
+	files = await fetchAllItemNames(dirPath);
 
 	// Generate a new name (Untitled.md, if there are any exiting Untitled notes, increment the number by 1)
 	if (!name) {
@@ -33,13 +40,15 @@ export const createNote = async (dirPath: string, name?: string) => {
 	}
 
 	// Save the new note
-	await db.insert(entryTable).values({
-		name,
-		path: `${dirPath}/${name}`.replace('//', '/'),
-		content: '',
-		parentPath: dirPath,
-		collectionPath: get(collection)
-	});
+	// await db.insert(entryTable).values({
+	// 	name,
+	// 	path: `${dirPath}/${name}`.replace('//', '/'),
+	// 	content: '',
+	// 	parentPath: dirPath,
+	// 	collectionPath: get(collection)
+	// });
+
+	await saveNoteToBackend(`${dirPath}/${name}`.replace('//', '/'), '');
 
 	// Open the note
 	openNote(`${dirPath}/${name}`.replace('//', '/'));
@@ -63,7 +72,7 @@ export async function openNote(path: string, skipHistory = false) {
 
 // Delete a note
 export const deleteNote = async (path: string) => {
-	await db.delete(entryTable).where(eq(entryTable.path, path));
+	await deleteItemInBackend(path);
 	activeFile.set(null);
 };
 
@@ -199,7 +208,7 @@ export const duplicateNote = async (path: string) => {
 
 export const getNoteMetadataParams = async (path: string): Promise<NoteMetadataParams> => {
 	// General file metadata
-	const fileMetadata = await db.select().from(entryTable).where(eq(entryTable.path, path));
+	const fileMetadata = await fetchNoteContentFromBackend(path);
 
 	// Get editor metadata
 	const editorWordCount = get(editor).storage.characterCount.words();
@@ -210,9 +219,9 @@ export const getNoteMetadataParams = async (path: string): Promise<NoteMetadataP
 
 	return {
 		fileMetadata: {
-			createdAt: fileMetadata[0].createdAt,
-			modifiedAt: fileMetadata[0].updatedAt,
-			size: fileMetadata[0].size ?? 0
+			createdAt: new Date(fileMetadata.createdAt),
+			modifiedAt: new Date(fileMetadata.modifiedAt),
+			size: fileMetadata.size ?? 0
 		},
 		editorMetadata: {
 			words: editorWordCount,
