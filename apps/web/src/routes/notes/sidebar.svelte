@@ -6,7 +6,7 @@
 	import Shortcut from '@/components/shared/shortcut.svelte';
 	import Tooltip from '@/components/shared/tooltip.svelte';
 	import { SHORTCUTS } from '@/constants';
-	import { pgClient } from '@/database/client';
+
 	import {
 		activeFile,
 		collection,
@@ -27,6 +27,7 @@
 	import { get } from 'svelte/store';
 	import Entries from './entries.svelte';
 	import SearchResults from './search-results.svelte';
+	import { webSocketService } from '@/services/websocket';
 
 	let searchValue: string;
 	let searchDebounce: NodeJS.Timeout;
@@ -38,14 +39,69 @@
 	let folderToggleState: 'collapse' | 'expand';
 	let toggleFolderStates: () => void;
 	let stopWatching: () => void;
+	let isWebSocketConnected = false;
 
-	// Watch for changes in the collection
+	// Watch for changes in the collection using WebSocket with fallback to polling
 	async function watchCollection() {
-		const dbWatcher = await pgClient.live.query(`SELECT * FROM entry`, [], async () => {
-			await fetchCollectionEntries($collection);
-		});
+		// Clean up any existing connections
+		if (stopWatching) {
+			stopWatching();
+		}
 
-		return dbWatcher.unsubscribe;
+		try {
+			// Try to connect via WebSocket
+			console.log('Attempting to connect via WebSocket...', $collection);
+			await webSocketService.connect();
+			isWebSocketConnected = true;
+
+			// Subscribe to file changes for this collection
+			const subscriptionId = `sidebar-${$collection}`;
+			webSocketService.subscribe(subscriptionId, async (data) => {
+				if (data.type === 'file_change') {
+					console.log('File change detected via WebSocket:', data);
+					await fetchCollectionEntries($collection);
+				}
+			});
+
+			// Subscribe to collection changes
+			webSocketService.subscribeToCollection($collection);
+
+			// Return cleanup function
+			return () => {
+				webSocketService.unsubscribe(subscriptionId);
+			};
+		} catch (error) {
+			console.error('WebSocket connection failed, falling back to polling:', error);
+			isWebSocketConnected = false;
+			return fallbackToPolling();
+		}
+	}
+
+	// Fallback polling implementation
+	let pollInterval: NodeJS.Timeout | null = null;
+
+	function fallbackToPolling() {
+		// Clear any existing polling interval
+		if (pollInterval) {
+			clearInterval(pollInterval);
+		}
+
+		// Poll for changes every 3 seconds
+		pollInterval = setInterval(async () => {
+			try {
+				await fetchCollectionEntries($collection);
+			} catch (error) {
+				console.error('Error polling collection entries:', error);
+			}
+		}, 3000);
+
+		// Return cleanup function
+		return () => {
+			if (pollInterval) {
+				clearInterval(pollInterval);
+				pollInterval = null;
+			}
+		};
 	}
 
 	const stopWatchingStore = collectionEntries.subscribe((value) => {
@@ -168,6 +224,8 @@
 
 	onDestroy(() => {
 		if (stopWatching) stopWatching();
+		if (pollInterval) clearInterval(pollInterval);
+		if (isWebSocketConnected) webSocketService.disconnect();
 		stopWatchingStore();
 		stopWatchingCollectionStore();
 	});

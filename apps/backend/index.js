@@ -1,9 +1,14 @@
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
+const http = require('http');
+const WebSocket = require('ws');
 const { corsMiddleware } = require('./config/cors');
 
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
 const PORT = process.env.PORT || 3000;
 const VOLUME_PATH = process.env.VOLUME_PATH || './Haptic';
 const ROOT_NAME = process.env.ROOT_NAME || 'Haptic';
@@ -22,6 +27,58 @@ const ensureDataDirectory = async () => {
 };
 
 ensureDataDirectory();
+
+// WebSocket connection handling
+const clients = new Set();
+
+wss.on('connection', (ws) => {
+  console.log('New WebSocket client connected');
+  clients.add(ws);
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+      if (data.type === 'subscribe' && data.collection) {
+        ws.collection = data.collection;
+        console.log(`Client subscribed to collection: ${data.collection}`);
+      }
+    } catch (error) {
+      console.error('Error parsing WebSocket message:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('WebSocket client disconnected');
+    clients.delete(ws);
+  });
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+    clients.delete(ws);
+  });
+});
+
+// Function to broadcast file system changes
+const broadcastChange = (collection, changeType, path) => {
+  const message = JSON.stringify({
+    type: 'file_change',
+    collection,
+    changeType, // 'created', 'updated', 'deleted'
+    path,
+    timestamp: new Date().toISOString()
+  });
+
+  console.log(`Broadcasting message: ${message}`);
+
+  console.log(`Broadcasting to ${clients.size} clients`);
+
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+      console.log(`Broadcasted change to client: ${message}`);
+    }
+  });
+};
 
 const toApiPath = (relativePath = '') => {
   const normalized = relativePath.split(path.sep).filter(Boolean).join('/');
@@ -187,15 +244,30 @@ app.post('/markdown', async (req, res) => {
 
     const { prepared, fsPath } = resolved;
 
+    // Check if file already exists to determine if this is create or update
+    let isUpdate = false;
+    try {
+      await fs.stat(fsPath);
+      isUpdate = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+      // File doesn't exist, this is a create operation
+    }
+
     // Ensure the directory exists before writing the file
     await fs.mkdir(path.dirname(fsPath), { recursive: true });
 
     // Write markdown content to file
     await fs.writeFile(fsPath, markdown, 'utf8');
-    console.log(`Markdown file saved: ${fsPath}`);
+    console.log(`Markdown file ${isUpdate ? 'updated' : 'created'}: ${fsPath}`);
 
-    res.status(201).json({
-      message: 'Markdown file created successfully',
+    // Broadcast the file change to WebSocket clients
+    broadcastChange(ROOT_NAME, isUpdate ? 'updated' : 'created', prepared.normalizedPath);
+
+    res.status(isUpdate ? 200 : 201).json({
+      message: `Markdown file ${isUpdate ? 'updated' : 'created'} successfully`,
       filename: prepared.normalizedPath, // echo back the normalized API path
       fullPath: fsPath
     });
@@ -203,6 +275,59 @@ app.post('/markdown', async (req, res) => {
     console.error('Error saving markdown file:', error);
     res.status(500).json({
       error: 'Failed to save markdown file',
+      details: error.message
+    });
+  }
+});
+
+// PUT route to handle markdown content updates
+app.put('/markdown', async (req, res) => {
+  try {
+    if (!req.is('application/json')) {
+      return res.status(400).json({ error: 'Invalid content type. Expected application/json' });
+    }
+
+    const { path: filePath, markdown } = req.body;
+
+    if (!filePath) {
+      return res.status(400).json({ error: 'path is required. Include "path" field in JSON body' });
+    }
+
+    const resolved = resolveFsPathFromApiPath(filePath);
+    if (!resolved) {
+      return res
+        .status(400)
+        .json({ error: 'Invalid path provided. Ensure the "path" field contains a valid value' });
+    }
+
+    const { prepared, fsPath } = resolved;
+
+    // Check if file exists
+    try {
+      await fs.stat(fsPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      throw error;
+    }
+
+    // Write updated markdown content to file
+    await fs.writeFile(fsPath, markdown, 'utf8');
+    console.log(`Markdown file updated: ${fsPath}`);
+
+    // Broadcast the file update to WebSocket clients
+    broadcastChange(ROOT_NAME, 'updated', prepared.normalizedPath);
+
+    res.status(200).json({
+      message: 'Markdown file updated successfully',
+      filename: prepared.normalizedPath,
+      fullPath: fsPath
+    });
+  } catch (error) {
+    console.error('Error updating markdown file:', error);
+    res.status(500).json({
+      error: 'Failed to update markdown file',
       details: error.message
     });
   }
@@ -401,6 +526,9 @@ app.post('/markdown/folder', async (req, res) => {
     await fs.mkdir(fsPath, { recursive: true });
     console.log(`Directory created: ${fsPath}`);
 
+    // Broadcast the folder creation to WebSocket clients
+    broadcastChange(ROOT_NAME, 'created', prepared.normalizedPath);
+
     res.status(201).json({
       message: 'Directory created successfully',
       path: prepared.normalizedPath,
@@ -475,6 +603,9 @@ app.delete('/markdown', async (req, res) => {
       await fs.rmdir(targetPath, { recursive });
       console.log(`Directory deleted: ${targetPath}`);
 
+      // Broadcast the directory deletion to WebSocket clients
+      broadcastChange(ROOT_NAME, 'deleted', preparedPath.normalizedPath);
+
       res.status(200).json({
         message: 'Directory deleted successfully',
         path: preparedPath.normalizedPath,
@@ -485,6 +616,9 @@ app.delete('/markdown', async (req, res) => {
       // Delete file
       await fs.unlink(targetPath);
       console.log(`File deleted: ${targetPath}`);
+
+      // Broadcast the file deletion to WebSocket clients
+      broadcastChange(ROOT_NAME, 'deleted', preparedPath.normalizedPath);
 
       res.status(200).json({
         message: 'File deleted successfully',
@@ -508,7 +642,8 @@ app.get('/health', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`WebSocket server running on ws://localhost:${PORT}`);
   console.log(`Data directory: ${VOLUME_PATH}`);
 });

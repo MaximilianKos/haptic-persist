@@ -13,14 +13,6 @@ export const fetchCollectionEntries = async (
 	sort: 'name' | 'date' = 'name',
 	showDotfiles = false
 ): Promise<FileEntry[]> => {
-	console.log(
-		'Fetching collection entries for dirPath:',
-		dirPath,
-		'sort:',
-		sort,
-		'showDotfiles:',
-		showDotfiles
-	);
 	dirPath = dirPath || get(collection);
 	if (!dirPath) throw new Error('No directory path provided');
 
@@ -80,9 +72,11 @@ export const fetchCollectionEntries = async (
 	// };
 
 	// // Set collectionEntries if length is different
-	// collectionEntries.set(showDotfiles ? fileEntries : filterDotfiles(fileEntries));
 
 	const fileEntries: FileEntry[] = await fetchNotesFromBackend(dirPath);
+
+	collectionEntries.set(fileEntries);
+	console.log('Fetched collection entries:', fileEntries);
 
 	return fileEntries;
 };
