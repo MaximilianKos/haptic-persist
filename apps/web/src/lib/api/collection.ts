@@ -5,6 +5,7 @@ import type { FileEntry } from '@/types';
 import { buildFileTree, sortFileEntry } from '@/utils';
 import { and, eq } from 'drizzle-orm';
 import { get } from 'svelte/store';
+import { fetchNotesFromBackend } from './api';
 
 // Fetch the collection entries
 export const fetchCollectionEntries = async (
@@ -12,68 +13,78 @@ export const fetchCollectionEntries = async (
 	sort: 'name' | 'date' = 'name',
 	showDotfiles = false
 ): Promise<FileEntry[]> => {
+	console.log(
+		'Fetching collection entries for dirPath:',
+		dirPath,
+		'sort:',
+		sort,
+		'showDotfiles:',
+		showDotfiles
+	);
 	dirPath = dirPath || get(collection);
 	if (!dirPath) throw new Error('No directory path provided');
 
-	// Get collection by path
-	const collectionObj = await db
-		.select()
-		.from(collectionTable)
-		.where(eq(collectionTable.path, get(collection)));
+	// // Get collection by path
+	// const collectionObj = await db
+	// 	.select()
+	// 	.from(collectionTable)
+	// 	.where(eq(collectionTable.path, get(collection)));
 
-	if (collectionObj.length === 0) throw new Error('Collection not found');
+	// if (collectionObj.length === 0) throw new Error('Collection not found');
 
-	// Read all entries linked to the collection
-	const entries = await db
-		.select()
-		.from(entryTable)
-		.where(
-			and(
-				eq(entryTable.collectionPath, get(collection)),
-				dirPath !== get(collection) ? eq(entryTable.parentPath, dirPath) : undefined
-			)
-		);
+	// // Read all entries linked to the collection
+	// const entries = await db
+	// 	.select()
+	// 	.from(entryTable)
+	// 	.where(
+	// 		and(
+	// 			eq(entryTable.collectionPath, get(collection)),
+	// 			dirPath !== get(collection) ? eq(entryTable.parentPath, dirPath) : undefined
+	// 		)
+	// 	);
 
-	// Convert entries to FileEntry[] format with recursive children
-	const fileEntries = buildFileTree(entries, dirPath);
+	// // Convert entries to FileEntry[] format with recursive children
+	// const fileEntries = buildFileTree(entries, dirPath);
 
-	// Sort entries recursively
-	const sortEntries = (entries: FileEntry[]) => {
-		entries.sort((a, b) => {
-			if (sort === 'name' && a.name && b.name) {
-				return sortFileEntry(a, b);
-			} else if (sort === 'date') {
-				console.warn('Sorting by date is not implemented yet');
-			}
-			return 0;
-		});
+	// // Sort entries recursively
+	// const sortEntries = (entries: FileEntry[]) => {
+	// 	entries.sort((a, b) => {
+	// 		if (sort === 'name' && a.name && b.name) {
+	// 			return sortFileEntry(a, b);
+	// 		} else if (sort === 'date') {
+	// 			console.warn('Sorting by date is not implemented yet');
+	// 		}
+	// 		return 0;
+	// 	});
 
-		entries.forEach((entry) => {
-			if (entry.children) {
-				sortEntries(entry.children);
-			}
-		});
-	};
+	// 	entries.forEach((entry) => {
+	// 		if (entry.children) {
+	// 			sortEntries(entry.children);
+	// 		}
+	// 	});
+	// };
 
-	sortEntries(fileEntries);
+	// sortEntries(fileEntries);
 
-	// Hide dotfiles recursively
-	const filterDotfiles = (entries: FileEntry[]): FileEntry[] => {
-		return entries.filter((entry) => {
-			if (!showDotfiles && entry.name?.startsWith('.')) {
-				return false;
-			}
-			if (entry.children) {
-				entry.children = filterDotfiles(entry.children);
-			}
-			return true;
-		});
-	};
+	// // Hide dotfiles recursively
+	// const filterDotfiles = (entries: FileEntry[]): FileEntry[] => {
+	// 	return entries.filter((entry) => {
+	// 		if (!showDotfiles && entry.name?.startsWith('.')) {
+	// 			return false;
+	// 		}
+	// 		if (entry.children) {
+	// 			entry.children = filterDotfiles(entry.children);
+	// 		}
+	// 		return true;
+	// 	});
+	// };
 
-	// Set collectionEntries if length is different
-	collectionEntries.set(showDotfiles ? fileEntries : filterDotfiles(fileEntries));
+	// // Set collectionEntries if length is different
+	// collectionEntries.set(showDotfiles ? fileEntries : filterDotfiles(fileEntries));
 
-	return showDotfiles ? fileEntries : filterDotfiles(fileEntries);
+	const fileEntries: FileEntry[] = await fetchNotesFromBackend(dirPath);
+
+	return fileEntries;
 };
 
 export const loadCollection = async (path?: string | undefined) => {
@@ -97,21 +108,21 @@ export const loadCollection = async (path?: string | undefined) => {
 	// Check if collection already exists
 	const collections = await db.select().from(collectionTable).where(eq(collectionTable.path, path));
 
-	if (collections && collections.length > 0) {
-		// Update collection
-		await db
-			.update(collectionTable)
-			.set({ lastOpened: new Date() })
-			.where(eq(collectionTable.path, path));
-	} else {
-		// Insert collection
-		await db.insert(collectionTable).values(collectionObj);
-	}
+	// if (collections && collections.length > 0) {
+	// 	// Update collection
+	// 	await db
+	// 		.update(collectionTable)
+	// 		.set({ lastOpened: new Date() })
+	// 		.where(eq(collectionTable.path, path));
+	// } else {
+	// 	// Insert collection
+	// 	await db.insert(collectionTable).values(collectionObj);
+	// }
 };
 
 // Get all collections
 export const getCollections = async (): Promise<(typeof collectionTable.$inferSelect)[]> => {
-	const collections = await db.select().from(collectionTable);
+	//const collections = await db.select().from(collectionTable);
 
-	return collections;
+	return new Promise((resolve) => resolve([]));
 };
