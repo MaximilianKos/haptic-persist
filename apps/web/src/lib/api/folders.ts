@@ -5,7 +5,12 @@ import { getNextUntitledName } from '@/utils';
 import { and, eq } from 'drizzle-orm';
 import { get } from 'svelte/store';
 import { moveNote } from './notes';
-import { createFolderInBackend, deleteItemInBackend, fetchAllItemNames } from './api';
+import {
+	createFolderInBackend,
+	deleteItemInBackend,
+	fetchAllItemNames,
+	renameNoteInBackend
+} from './api';
 
 // Create a new folder
 export const createFolder = async (dirPath: string) => {
@@ -28,8 +33,6 @@ export const createFolder = async (dirPath: string) => {
 	// }
 
 	files = await fetchAllItemNames(dirPath);
-
-	console.log('Existing files in directory:', files);
 
 	// Generate a new name (Untitled, if there are any exiting Untitled folders, increment the number by 1)
 	const name = getNextUntitledName(files, 'Untitled');
@@ -55,10 +58,12 @@ export const deleteFolder = async (path: string, recursive = false) => {
 
 // Rename a folder
 export const renameFolder = async (path: string, name: string) => {
-	await db
-		.update(entryTable)
-		.set({ name, path: `${path.split('/').slice(0, -1).join('/')}/${name}` })
-		.where(eq(entryTable.path, path));
+	await renameNoteInBackend(path, name);
+
+	// await db
+	// 	.update(entryTable)
+	// 	.set({ name, path: `${path.split('/').slice(0, -1).join('/')}/${name}` })
+	// 	.where(eq(entryTable.path, path));
 };
 
 // Move a folder

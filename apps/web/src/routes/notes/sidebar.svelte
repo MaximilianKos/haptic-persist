@@ -49,8 +49,6 @@
 		}
 
 		try {
-			// Try to connect via WebSocket
-			console.log('Attempting to connect via WebSocket...', $collection);
 			await webSocketService.connect();
 			isWebSocketConnected = true;
 
@@ -58,7 +56,6 @@
 			const subscriptionId = `sidebar-${$collection}`;
 			webSocketService.subscribe(subscriptionId, async (data) => {
 				if (data.type === 'file_change') {
-					console.log('File change detected via WebSocket:', data);
 					await fetchCollectionEntries($collection);
 				}
 			});

@@ -58,7 +58,6 @@ export const createNote = async (dirPath: string, name?: string) => {
 // Open a note
 export async function openNote(path: string, skipHistory = false) {
 	const file = await fetchNoteContentFromBackend(path);
-	console.log('Opening note:', path, file);
 	setEditorContent(file.content ?? '');
 	activeFile.set(path);
 	if (!skipHistory) {
@@ -118,11 +117,6 @@ export const saveNote = async (path: string) => {
 
 	// Remove the first heading title
 	content = content.replace(/^# .*\n/, '');
-
-	// Calculate file size in bytes
-	const size = new TextEncoder().encode(content).length;
-
-	console.log('Saving note:', path, 'Size:', size, 'content:', content);
 
 	// Update the database
 	// await db

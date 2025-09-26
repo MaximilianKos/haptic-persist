@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { fetchAllItemNames } from '@/api/api';
+	import { fetchCollectionEntries } from '@/api/collection';
 	import { createFolder, deleteFolder, moveFolder, renameFolder } from '@/api/folders';
 	import { createNote, deleteNote, duplicateNote, moveNote, openNote } from '@/api/notes';
 	import Icon from '@/components/shared/icon.svelte';
@@ -96,13 +98,27 @@
 			}, 100);
 
 			// Add blur event listener to the span
-			span?.addEventListener('blur', () => {
+			span?.addEventListener('blur', async () => {
 				// Set the contenteditable attribute to false
 				span?.setAttribute('contenteditable', 'false');
 
 				// Rename the folder
 				if (isRenaming) {
-					renameFolder(entry.path, span?.textContent || '');
+					await renameFolder(entry.path, span?.textContent || '');
+
+					// refresh entries
+					entries = await fetchCollectionEntries($collection);
+
+					if (get(activeFile)?.startsWith(entry.path)) {
+						// If the active file is within the renamed folder, update its path
+						const newActiveFilePath = get(activeFile)?.replace(
+							entry.path,
+							entry.path.split('/').slice(0, -1).join('/') + '/' + (span?.textContent || '')
+						);
+						if (newActiveFilePath) {
+							openNote(newActiveFilePath, true);
+						}
+					}
 				}
 
 				// Set the isRenaming variable to false

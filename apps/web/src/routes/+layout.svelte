@@ -32,6 +32,7 @@
 
 	// Load latest collection
 	async function loadLatestCollection() {
+		//console.log('shouldnt happen1 ');
 		const collections = await db.select().from(collectionTable);
 
 		if (!collections || collections.length === 0) return;
