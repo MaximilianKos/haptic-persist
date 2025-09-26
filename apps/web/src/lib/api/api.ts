@@ -86,3 +86,22 @@ export const deleteItemInBackend = async (path: string, recursive = false) => {
 	}
 	return response.json();
 };
+
+export const renameNoteInBackend = async (path: string, name: string) => {
+	const response = await fetch(`${BACKEND_API_URL}/markdown/rename`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			path,
+			name
+		})
+	});
+
+	if (!response.ok) {
+		const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+		throw new Error(`Backend API error: ${errorData.error || response.statusText}`);
+	}
+	return response.json();
+};

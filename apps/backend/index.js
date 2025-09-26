@@ -543,6 +543,116 @@ app.post('/markdown/folder', async (req, res) => {
   }
 });
 
+// POST route to rename files or directories
+app.post('/markdown/rename', async (req, res) => {
+  try {
+    if (!req.is('application/json')) {
+      return res.status(400).json({ error: 'Invalid content type. Expected application/json' });
+    }
+
+    const { path: filePath, name } = req.body;
+
+    if (!filePath) {
+      return res.status(400).json({ error: 'path is required. Include "path" field in JSON body' });
+    }
+
+    if (!name) {
+      return res.status(400).json({ error: 'name is required. Include "name" field in JSON body' });
+    }
+
+    if (typeof name !== 'string' || name.trim() === '') {
+      return res.status(400).json({ error: 'name must be a non-empty string' });
+    }
+
+    const resolved = resolveFsPathFromApiPath(filePath);
+    if (!resolved) {
+      return res.status(400).json({
+        error: 'Invalid path provided. Ensure the "path" field contains a valid value'
+      });
+    }
+
+    const { prepared, fsPath: oldPath } = resolved;
+
+    // Check if the source file/directory exists
+    let stats;
+    try {
+      stats = await fs.stat(oldPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.status(404).json({
+          error: 'Path not found',
+          details: 'The requested file or directory does not exist'
+        });
+      }
+      throw error;
+    }
+
+    // Prevent renaming the root volume directory
+    const volResolved = path.resolve(VOLUME_PATH);
+    if (oldPath === volResolved) {
+      return res.status(403).json({
+        error: 'Cannot rename root directory',
+        details: 'Renaming of the root volume directory is not allowed'
+      });
+    }
+
+    // Sanitize the new name (remove path separators and invalid characters)
+    const sanitizedName = name.trim().replace(/[/\\:*?"<>|]/g, '');
+    if (sanitizedName !== name.trim()) {
+      return res.status(400).json({
+        error: 'Invalid name',
+        details: 'Name contains invalid characters. Avoid: / \\ : * ? " < > |'
+      });
+    }
+
+    // Construct new path
+    const parentDir = path.dirname(oldPath);
+    const newPath = path.join(parentDir, sanitizedName);
+
+    // Check if the new path already exists
+    try {
+      await fs.stat(newPath);
+      return res.status(409).json({
+        error: 'Name already exists',
+        details: 'A file or directory with the new name already exists'
+      });
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+      // New path doesn't exist, which is what we want
+    }
+
+    // Perform the rename operation
+    await fs.rename(oldPath, newPath);
+    console.log(
+      `${stats.isDirectory() ? 'Directory' : 'File'} renamed from ${oldPath} to ${newPath}`
+    );
+
+    // Calculate old and new API paths for broadcasting
+    const oldApiPath = prepared.normalizedPath;
+    const newApiPath = toApiPath(path.relative(VOLUME_PATH, newPath));
+
+    // Broadcast the rename as a delete of old path and create of new path
+    broadcastChange(ROOT_NAME, 'deleted', oldApiPath);
+    broadcastChange(ROOT_NAME, 'created', newApiPath);
+
+    res.status(200).json({
+      message: `${stats.isDirectory() ? 'Directory' : 'File'} renamed successfully`,
+      oldPath: oldApiPath,
+      newPath: newApiPath,
+      name: sanitizedName,
+      type: stats.isDirectory() ? 'directory' : 'file'
+    });
+  } catch (error) {
+    console.error('Error renaming item:', error);
+    res.status(500).json({
+      error: 'Failed to rename item',
+      details: error.message
+    });
+  }
+});
+
 // DELETE route to delete files or directories
 app.delete('/markdown', async (req, res) => {
   try {

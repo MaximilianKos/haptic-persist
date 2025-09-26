@@ -9,6 +9,7 @@ import {
 	deleteItemInBackend,
 	fetchAllItemNames,
 	fetchNoteContentFromBackend,
+	renameNoteInBackend,
 	saveNoteToBackend
 } from './api';
 
@@ -86,25 +87,27 @@ export const renameNote = async (path: string, name: string) => {
 	// Remove breaking characters
 	name = name.replace(/[/\\?%*:|"<>]/g, '');
 
-	// Get the note
-	const entry = await db.select().from(entryTable).where(eq(entryTable.path, path));
+	await renameNoteInBackend(path, name);
 
-	// Get all files in the directory
-	const files = await db
-		.select()
-		.from(entryTable)
-		.where(eq(entryTable.parentPath, entry[0].parentPath!));
+	// // Get the note
+	// const entry = await db.select().from(entryTable).where(eq(entryTable.path, path));
 
-	// Make sure there are no name conflicts
-	if (files.some((file) => file.name?.toLowerCase() === name.toLowerCase() && !file.isFolder)) {
-		throw new Error('Name conflict');
-	}
+	// // Get all files in the directory
+	// const files = await db
+	// 	.select()
+	// 	.from(entryTable)
+	// 	.where(eq(entryTable.parentPath, entry[0].parentPath!));
 
-	// Rename the file
-	await db
-		.update(entryTable)
-		.set({ name, path: `${path.split('/').slice(0, -1).join('/')}/${name}` })
-		.where(eq(entryTable.path, path));
+	// // Make sure there are no name conflicts
+	// if (files.some((file) => file.name?.toLowerCase() === name.toLowerCase() && !file.isFolder)) {
+	// 	throw new Error('Name conflict');
+	// }
+
+	// // Rename the file
+	// await db
+	// 	.update(entryTable)
+	// 	.set({ name, path: `${path.split('/').slice(0, -1).join('/')}/${name}` })
+	// 	.where(eq(entryTable.path, path));
 	activeFile.set(`${path.split('/').slice(0, -1).join('/')}/${name}`);
 };
 
