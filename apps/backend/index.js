@@ -433,7 +433,40 @@ app.get('/markdown/content', async (req, res) => {
   }
 });
 
-app.get('/markdown/names', async (req, res) => {
+// Helper function to recursively collect all item names
+const collectNamesRecursively = async (dirPath, basePath = '') => {
+  const names = [];
+
+  try {
+    const dirEntries = await fs.readdir(dirPath, { withFileTypes: true });
+    const sortedEntries = dirEntries
+      .filter((entry) => !entry.name.startsWith('.')) // Skip hidden files/folders
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+    for (const entry of sortedEntries) {
+      const relativePath = basePath ? path.join(basePath, entry.name) : entry.name;
+      const fullPath = path.join(dirPath, entry.name);
+
+      if (entry.isDirectory()) {
+        // Add directory name
+        names.push({ name: entry.name, path: relativePath, type: 'directory' });
+        // Recursively collect names from subdirectories
+        const subNames = await collectNamesRecursively(fullPath, relativePath);
+        names.push(...subNames);
+      } else {
+        // Add file name
+        names.push({ name: entry.name, path: relativePath, type: 'file' });
+      }
+    }
+  } catch (error) {
+    console.error(`Error reading directory ${dirPath}:`, error);
+    // Continue with other directories instead of failing completely
+  }
+
+  return names;
+};
+
+app.get('/markdown/notes/names', async (req, res) => {
   try {
     const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : req.query.path;
 
@@ -466,17 +499,56 @@ app.get('/markdown/names', async (req, res) => {
       return res.status(400).json({ error: 'Path must point to a directory' });
     }
 
-    const dirEntries = await fs.readdir(targetPath, { withFileTypes: true });
-    const sortedEntries = dirEntries
-      .filter((entry) => !entry.name.startsWith('.')) // Skip hidden files/folders
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-
-    const names = sortedEntries.map((entry) => ({ name: entry.name }));
+    const names = await collectNamesRecursively(targetPath);
 
     return res.json(names);
   } catch (error) {
     console.error('Error fetching file/folder names:', error);
     res.status(500).json({ error: 'Failed to fetch names', details: error.message });
+  }
+});
+
+app.get('/markdown/folders/names', async (req, res) => {
+  try {
+    const rawPath = Array.isArray(req.query.path) ? req.query.path[0] : req.query.path;
+
+    // Default to volume root if no path specified
+    let targetPath;
+    if (rawPath) {
+      const resolved = resolveFsPathFromApiPath(rawPath);
+      if (!resolved) {
+        return res.status(400).json({ error: 'Invalid path' });
+      }
+      targetPath = resolved.fsPath;
+    } else {
+      targetPath = path.resolve(VOLUME_PATH);
+    }
+
+    let stats;
+    try {
+      stats = await fs.stat(targetPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.status(404).json({
+          error: 'Path not found',
+          details: 'The requested directory does not exist'
+        });
+      }
+      throw error;
+    }
+
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ error: 'Path must point to a directory' });
+    }
+
+    const allNames = await collectNamesRecursively(targetPath);
+    // Filter to only include directories
+    const folderNames = allNames.filter((item) => item.type === 'directory');
+
+    return res.json(folderNames);
+  } catch (error) {
+    console.error('Error fetching folder names:', error);
+    res.status(500).json({ error: 'Failed to fetch folder names', details: error.message });
   }
 });
 

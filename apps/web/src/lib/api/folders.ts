@@ -32,7 +32,7 @@ export const createFolder = async (dirPath: string) => {
 	// 		);
 	// }
 
-	files = await fetchAllItemNames(dirPath);
+	files = await fetchAllItemNames(dirPath, true);
 
 	// Generate a new name (Untitled, if there are any exiting Untitled folders, increment the number by 1)
 	const name = getNextUntitledName(files, 'Untitled');

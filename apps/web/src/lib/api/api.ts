@@ -41,9 +41,10 @@ export const fetchNoteContentFromBackend = async (path: string) => {
 	return await response.json();
 };
 
-export const fetchAllItemNames = async (dirPath: string) => {
+export const fetchAllItemNames = async (dirPath: string, folder = false) => {
+	const endpoint = folder ? 'folders/names' : 'notes/names';
 	const response = await fetch(
-		`${BACKEND_API_URL}/markdown/names?dirPath=${encodeURIComponent(dirPath)}`
+		`${BACKEND_API_URL}/markdown/${endpoint}?dirPath=${encodeURIComponent(dirPath)}`
 	);
 	if (!response.ok) {
 		const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
