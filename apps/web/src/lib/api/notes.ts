@@ -176,31 +176,33 @@ export const moveNote = async (source: string, target: string) => {
 
 // Duplicate a note (format: "<name> (<number>).<ext>") - <number> is incremented if there are any existing notes with the same name
 export const duplicateNote = async (path: string) => {
-	// Fetch the content of the note
-	const entry = await db.select().from(entryTable).where(eq(entryTable.path, path));
+	// Fetch the content of the note from backend
+	const noteContent = await fetchNoteContentFromBackend(path);
 
 	// Extract the name and extension of the note
 	const ext = path.split('.').pop()!;
+	const noteName = path.split('/').pop()!;
 
-	// Get current index of the note
-	const files = await db
-		.select()
-		.from(entryTable)
-		.where(eq(entryTable.parentPath, entry[0].parentPath!));
-	const notes = files.filter((file) => file.name?.startsWith(entry[0].name!) && !file.isFolder);
+	// Get parent directory path
+	const parentPath = path.split('/').slice(0, -1).join('/');
+
+	// Get all files in the same directory from backend
+	const files = await fetchAllItemNames(parentPath);
+	const notes = files.filter(
+		(file: { name: string; path: string; type: 'file' | 'directory' }) =>
+			file.type === 'file' &&
+			file.name?.startsWith(noteName.replace(`.${ext}`, '')) &&
+			file.name?.endsWith(`.${ext}`)
+	);
 
 	// Write the new note
-	const newName = `${entry[0].name?.replace(`.${ext}`, '')} (${notes.length}).${ext}`;
-	await db.insert(entryTable).values({
-		name: newName,
-		path: `${path.split('/').slice(0, -1).join('/')}/${newName}`,
-		parentPath: entry[0].parentPath,
-		collectionPath: entry[0].collectionPath,
-		content: entry[0].content
-	});
+	const newName = `${noteName.replace(`.${ext}`, '')} (${notes.length}).${ext}`;
+	const newPath = `${parentPath}/${newName}`;
+
+	await saveNoteToBackend(newPath, noteContent.content || '');
 
 	// Open the new note
-	openNote(`${path.split('/').slice(0, -1).join('/')}/${newName}`);
+	openNote(newPath);
 };
 
 export const getNoteMetadataParams = async (path: string): Promise<NoteMetadataParams> => {
