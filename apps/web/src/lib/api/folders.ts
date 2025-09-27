@@ -1,14 +1,9 @@
-import { db } from '@/database/client';
-import { entry as entryTable } from '@/database/schema';
-import { collection } from '@/store';
 import { getNextUntitledName } from '@/utils';
-import { and, eq } from 'drizzle-orm';
-import { get } from 'svelte/store';
-import { moveNote } from './notes';
 import {
 	createFolderInBackend,
 	deleteItemInBackend,
 	fetchAllItemNames,
+	moveNoteInBackend,
 	renameNoteInBackend
 } from './api';
 
@@ -52,7 +47,7 @@ export const createFolder = async (dirPath: string) => {
 };
 
 // Delete a folder
-export const deleteFolder = async (path: string, recursive = false) => {
+export const deleteFolder = async (path: string) => {
 	await deleteItemInBackend(path, true);
 };
 
@@ -68,30 +63,14 @@ export const renameFolder = async (path: string, name: string) => {
 
 // Move a folder
 export const moveFolder = async (source: string, target: string) => {
-	// Get target directory
-	const targetFiles = await db.select().from(entryTable).where(eq(entryTable.parentPath, target));
-
-	// Make sure there are no name conflicts
-	const folderName = source.split('/').pop()!;
-
-	if (targetFiles.some((file) => file.name === folderName && file.isFolder)) {
-		throw new Error('Name conflict');
-	}
-
-	// Get all source children
-	const sourceFiles = await db.select().from(entryTable).where(eq(entryTable.parentPath, source));
-
-	// Move all children
-	for (const file of sourceFiles) {
-		if (file.isFolder) {
-			await moveFolder(file.path, `${target}/${folderName}`);
-		} else {
-			await moveNote(file.path, `${target}/${folderName}`);
+	// Use backend API to move the folder (handles conflict checking and recursive file operations)
+	try {
+		await moveNoteInBackend(source, target);
+	} catch (error) {
+		// Re-throw with more descriptive error if it's a name conflict
+		if (error instanceof Error && error.message.includes('Name conflict')) {
+			throw new Error('Name conflict');
 		}
+		throw error;
 	}
-
-	await db
-		.update(entryTable)
-		.set({ path: `${target}/${folderName}`, parentPath: target })
-		.where(eq(entryTable.path, source));
 };
