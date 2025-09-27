@@ -106,3 +106,22 @@ export const renameNoteInBackend = async (path: string, name: string) => {
 	}
 	return response.json();
 };
+
+export const moveNoteInBackend = async (sourcePath: string, targetPath: string) => {
+	const response = await fetch(`${BACKEND_API_URL}/markdown/move`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			sourcePath,
+			targetPath
+		})
+	});
+
+	if (!response.ok) {
+		const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+		throw new Error(`Backend API error: ${errorData.error || response.statusText}`);
+	}
+	return response.json();
+};

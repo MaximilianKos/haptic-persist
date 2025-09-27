@@ -818,6 +818,128 @@ app.delete('/markdown', async (req, res) => {
   }
 });
 
+// POST route to move files or directories
+app.post('/markdown/move', async (req, res) => {
+  try {
+    if (!req.is('application/json')) {
+      return res.status(400).json({ error: 'Invalid content type. Expected application/json' });
+    }
+
+    const { sourcePath, targetPath } = req.body;
+
+    if (!sourcePath) {
+      return res
+        .status(400)
+        .json({ error: 'sourcePath is required. Include "sourcePath" field in JSON body' });
+    }
+
+    if (!targetPath) {
+      return res
+        .status(400)
+        .json({ error: 'targetPath is required. Include "targetPath" field in JSON body' });
+    }
+
+    // Resolve source path
+    const sourceResolved = resolveFsPathFromApiPath(sourcePath);
+    if (!sourceResolved) {
+      return res.status(400).json({
+        error: 'Invalid source path provided. Ensure the "sourcePath" field contains a valid value'
+      });
+    }
+
+    // Resolve target directory path
+    const targetResolved = resolveFsPathFromApiPath(targetPath);
+    if (!targetResolved) {
+      return res.status(400).json({
+        error: 'Invalid target path provided. Ensure the "targetPath" field contains a valid value'
+      });
+    }
+
+    const { prepared: sourcePrepared, fsPath: sourceFsPath } = sourceResolved;
+    const { prepared: targetPrepared, fsPath: targetFsPath } = targetResolved;
+
+    // Check if source exists
+    let sourceStats;
+    try {
+      sourceStats = await fs.stat(sourceFsPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.status(404).json({
+          error: 'Source not found',
+          details: 'The source file or directory does not exist'
+        });
+      }
+      throw error;
+    }
+
+    // Check if target directory exists
+    let targetStats;
+    try {
+      targetStats = await fs.stat(targetFsPath);
+      if (!targetStats.isDirectory()) {
+        return res.status(400).json({
+          error: 'Target must be a directory',
+          details: 'The target path must point to an existing directory'
+        });
+      }
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return res.status(404).json({
+          error: 'Target directory not found',
+          details: 'The target directory does not exist'
+        });
+      }
+      throw error;
+    }
+
+    // Get the name of the file/directory being moved
+    const itemName = path.basename(sourceFsPath);
+    const newPath = path.join(targetFsPath, itemName);
+
+    // Check if destination already exists (name conflict)
+    try {
+      await fs.stat(newPath);
+      return res.status(409).json({
+        error: 'Name conflict',
+        details: 'A file or directory with the same name already exists in the target directory'
+      });
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error;
+      }
+      // Destination doesn't exist, which is what we want
+    }
+
+    // Perform the move operation
+    await fs.rename(sourceFsPath, newPath);
+    console.log(
+      `${sourceStats.isDirectory() ? 'Directory' : 'File'} moved from ${sourceFsPath} to ${newPath}`
+    );
+
+    // Calculate old and new API paths for broadcasting
+    const oldApiPath = sourcePrepared.normalizedPath;
+    const newApiPath = toApiPath(path.relative(VOLUME_PATH, newPath));
+
+    // Broadcast the move as a delete of old path and create of new path
+    broadcastChange(ROOT_NAME, 'deleted', oldApiPath);
+    broadcastChange(ROOT_NAME, 'created', newApiPath);
+
+    res.status(200).json({
+      message: `${sourceStats.isDirectory() ? 'Directory' : 'File'} moved successfully`,
+      oldPath: oldApiPath,
+      newPath: newApiPath,
+      name: itemName,
+      type: sourceStats.isDirectory() ? 'directory' : 'file'
+    });
+  } catch (error) {
+    console.error('Error moving item:', error);
+    res.status(500).json({
+      error: 'Failed to move item',
+      details: error.message
+    });
+  }
+});
+
 // Health check route
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

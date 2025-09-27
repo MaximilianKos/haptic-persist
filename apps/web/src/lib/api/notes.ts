@@ -1,14 +1,12 @@
-import { db } from '@/database/client';
-import { entry as entryTable } from '@/database/schema';
-import { activeFile, collection, editor, noteHistory } from '@/store';
+import { activeFile, editor, noteHistory } from '@/store';
 import type { NoteMetadataParams } from '@/types';
 import { calculateReadingTime, getNextUntitledName, setEditorContent } from '@/utils';
-import { eq, and } from 'drizzle-orm';
 import { get } from 'svelte/store';
 import {
 	deleteItemInBackend,
 	fetchAllItemNames,
 	fetchNoteContentFromBackend,
+	moveNoteInBackend,
 	renameNoteInBackend,
 	saveNoteToBackend
 } from './api';
@@ -126,12 +124,6 @@ export const saveNote = async (path: string) => {
 
 	// Also save to backend API
 	try {
-		// Remove first path segment and get the filename
-		const pathSegments = path.split('/').filter(Boolean); // Remove empty segments
-		const filename =
-			pathSegments.length > 1
-				? pathSegments.slice(1).join('/')
-				: path.split('/').pop() || 'untitled.md';
 		await saveNoteToBackend(path, content);
 	} catch (error) {
 		console.error('Failed to save note to backend:', error);
@@ -140,38 +132,19 @@ export const saveNote = async (path: string) => {
 };
 
 export const moveNote = async (source: string, target: string) => {
-	// Get target directory
-	const targetDir = await db.select().from(entryTable).where(eq(entryTable.path, target));
+	// Use backend API to move the note (handles conflict checking and file operations)
+	try {
+		const result = await moveNoteInBackend(source, target);
 
-	let targetFiles = [];
-	if (targetDir.length === 0) {
-		targetFiles = await db.select().from(entryTable);
-	} else {
-		targetFiles = await db
-			.select()
-			.from(entryTable)
-			.where(eq(entryTable.parentPath, targetDir[0].path));
+		// Open the moved note
+		openNote(result.newPath);
+	} catch (error) {
+		// Re-throw with more descriptive error if it's a name conflict
+		if (error instanceof Error && error.message.includes('Name conflict')) {
+			throw new Error('Name conflict');
+		}
+		throw error;
 	}
-
-	// Make sure there are no name conflicts
-	const noteName = source.split('/').pop()!;
-
-	if (
-		targetFiles.some(
-			(file) => file.name === noteName && !file.isFolder && file.parentPath === target
-		)
-	) {
-		throw new Error('Name conflict');
-	}
-
-	// Update the note
-	await db
-		.update(entryTable)
-		.set({ path: `${target}/${noteName}`.replace('//', '/'), parentPath: target })
-		.where(eq(entryTable.path, source));
-
-	// Open the note
-	openNote(target + '/' + noteName);
 };
 
 // Duplicate a note (format: "<name> (<number>).<ext>") - <number> is incremented if there are any existing notes with the same name
