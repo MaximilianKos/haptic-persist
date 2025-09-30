@@ -1,5 +1,5 @@
 # Use Node.js as the base image
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -17,7 +17,7 @@ COPY . .
 RUN turbo prune web --docker
 
 # Install dependencies and build the project
-FROM node:18-alpine AS installer
+FROM node:20-alpine AS installer
 WORKDIR /app
 
 # Copy pruned files from the previous stage

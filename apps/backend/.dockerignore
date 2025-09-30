@@ -1,0 +1,6 @@
+node_modules
+Haptic
+npm-debug.log
+.git
+Dockerfile
+docker-compose.yml
